@@ -1,0 +1,64 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Datasets (Local ONLY - strictly excluded from GitHub & Cloud)
+dataset/
+idrid/
+selected_2000.csv
+*.zip
+*.tar.gz
+
+# Checkpoints: commit ONLY the protected V1 baseline
+checkpoints/*
+!checkpoints/best_model_combined_v1.pth
+
+# Exclude Objective 10 multi-page UI from cloud deployment while preserving locally
+/pages/
+
+# Local execution logs and runtime output artifacts
+outputs/
+*.log
+streamlit.log
+streamlit.err.log
+train_e1a.log
+train_e1b.log
+
+# Offline data-prep and training scripts (kept local)
+analyze_duplicates.py
+clean_dataset.py
+expand_dataset.py
+prepare_dataset.py
+split_dataset.py
+extract_selected_images.py
+train.py
+train_e1a.py
+train_e1b.py
+finetune_idrid.py
+evaluate.py
+evaluate_e1a.py
+evaluate_e1b.py
+evaluate_idrid.py
+smoke_test.py
+generate_deck.py
+dataset_loader.py
+predict.py
+train.csv
+*.csv
+

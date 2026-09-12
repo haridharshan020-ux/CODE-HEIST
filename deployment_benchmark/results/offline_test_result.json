@@ -1,0 +1,48 @@
+{
+  "checkpoint_exists": true,
+  "checkpoint_sha256_match": true,
+  "known_sha256": "3FA407E505F8653F00BD2CFB997224247E76FAC93C18DDEA7F35A973B0B85D05",
+  "actual_sha256": "3FA407E505F8653F00BD2CFB997224247E76FAC93C18DDEA7F35A973B0B85D05",
+  "network_available_before": true,
+  "network_available_after": true,
+  "inference_offline_passed": true,
+  "inference_results": [
+    {
+      "image_id": "4f0866b90c27",
+      "prediction": "PDR",
+      "confidence": 0.9334,
+      "elapsed_ms": 896.9,
+      "status": "PASS"
+    },
+    {
+      "image_id": "fe674c2f73f5",
+      "prediction": "Mild NPDR",
+      "confidence": 0.9789,
+      "elapsed_ms": 703.3,
+      "status": "PASS"
+    },
+    {
+      "image_id": "165634a6167e",
+      "prediction": "No DR",
+      "confidence": 0.9989,
+      "elapsed_ms": 897.0,
+      "status": "PASS"
+    },
+    {
+      "image_id": "b16dd4483ca5",
+      "prediction": "No DR",
+      "confidence": 0.9997,
+      "elapsed_ms": 581.9,
+      "status": "PASS"
+    },
+    {
+      "image_id": "1a7e3356b39c",
+      "prediction": "PDR",
+      "confidence": 0.9007,
+      "elapsed_ms": 1992.9,
+      "status": "PASS"
+    }
+  ],
+  "overall_pass": true,
+  "errors": []
+}

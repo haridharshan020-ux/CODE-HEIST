@@ -1,0 +1,204 @@
+======================================================================
+DR SCREENING SYSTEM - RURAL DEPLOYMENT BENCHMARK REPORT
+SIH 2026 - Objective 10: Rural Deployment Feasibility
+Generated: 2026-09-08 20:43:42
+======================================================================
+
+METHODOLOGY
+----------------------------------------
+Model Checkpoint : best_model_combined_v1.pth (EfficientNet-B0)
+Training Data    : APTOS 2019 + IDRiD Disease Grading (combined)
+Benchmark Images : 20 images from dataset/images/ (timing only, no retraining)
+Warmup Images    : 5 images (excluded from measurements)
+Timing Method    : time.perf_counter() wall time for full pipeline call
+Resource Monitor : psutil CPU% + process RSS RAM, polled every 0.5s
+
+IMPORTANT DISCLAIMER
+----------------------------------------
+Scenario A: Measured on current development hardware (no restrictions).
+Scenario B: SIMULATED low-resource via 1-core CPU affinity on current hardware.
+            NOT a measurement on actual rural/low-resource hardware.
+Scenario C: SIMULATED poor-connectivity via blocked outbound TCP (timeout=0.001s).
+            NOT a real rural network test.
+All results labelled 'Prototype Benchmark Results' as required.
+
+Rationale: Python-based deployment benchmarking was used because MATLAB/Simulink
+           is currently not accessible.
+
+======================================================================
+Prototype Benchmark Results - Scenario A (Normal Local)
+======================================================================
+Description  : Baseline benchmark on the current development machine using all available CPU cores. Represents best
+Hardware Note: Measured on current development hardware. Not representative of actual rural deployment hardware.
+
+  Warmup images    : 5
+  Measured images  : 20
+  Start timestamp  : 2026-09-08T20:42:28.336544
+  End timestamp    : 2026-09-08T20:42:50.904515
+
+  LATENCY STATISTICS (ms)
+    Mean   : 857.45 ms
+    Median : 811.93 ms
+    Min    : 447.20 ms
+    Max    : 1699.03 ms
+    StdDev : 258.79 ms
+
+  THROUGHPUT
+    Images/second : 1.1663
+
+  RESOURCE USAGE
+    Mean CPU%  : 41.6%
+    Mean RAM   : 532.6 MB
+    Monitor Mean CPU% : 40.4%
+    Monitor Max CPU%  : 70.8%
+    Monitor Mean RAM  : 723.7 MB
+    Monitor Max RAM   : 1237.3 MB
+
+  SYSTEM INFO
+    Platform        : Windows-11-10.0.26200-SP0
+    CPU cores (L/P) : 8 / 4
+    Total RAM       : 15648 MB
+
+  PER-IMAGE RESULTS
+  Image ID          Total(ms)       CPU%    RAM(MB)  Quality                     Prediction
+  ------------------------------------------------------------------------------------------
+  4f0866b90c27          899.0       40.5      510.7     PASS                      PDR (93%)
+  fe674c2f73f5          734.6       45.0      538.1     PASS                Mild NPDR (98%)
+  165634a6167e          918.5       42.1      540.6     PASS                   No DR (100%)
+  b16dd4483ca5          601.3       48.3      558.6     PASS                   No DR (100%)
+  1a7e3356b39c         1699.0       34.9      522.2     PASS                      PDR (90%)
+  521d3e264d71          447.2       61.6      516.4     PASS                      PDR (55%)
+  9782c0489eca          761.3       46.4      519.3     PASS            Moderate NPDR (50%)
+  49a4765f8822         1034.3       35.8      524.1     PASS            Moderate NPDR (89%)
+  58184d6fd087          703.6       41.4      522.1     PASS                Mild NPDR (51%)
+  5c7ab966a3ee          786.1       41.4      525.0     PASS                      PDR (99%)
+  54bdcdecd8f3          585.8       47.7      541.7     PASS                    No DR (99%)
+  d6e26fe51dce         1015.8       39.2      532.6     PASS            Moderate NPDR (64%)
+  a4d41c495666          856.7       40.1      561.8     PASS            Moderate NPDR (72%)
+  0cb14014117d         1117.7       34.2      524.6     PASS            Moderate NPDR (61%)
+  6d454444f17c          718.1       44.2      539.6     PASS            Moderate NPDR (46%)
+  3ac3fbfca7d4         1043.8       37.2      524.4     PASS                      PDR (90%)
+  080f66eedfb9          734.9       40.0      532.1     PASS                Mild NPDR (89%)
+  3461dc601cc2          867.1       37.0      533.5     PASS            Moderate NPDR (81%)
+  78b3f819dcc5          796.3       38.3      542.2     PASS            Moderate NPDR (45%)
+  d473f6fafba0          827.5       37.1      541.8     PASS            Moderate NPDR (66%)
+
+======================================================================
+Prototype Benchmark Results - Scenario B (Simulated Low-Resource)
+======================================================================
+Description  : Simulated low-resource configuration: CPU affinity restricted to 1 logical core to emulate constrain
+Hardware Note: SIMULATED low-resource configuration (1-core affinity on current development hardware). Actual rural device performance may differ significantly.
+
+  Warmup images    : 5
+  Measured images  : 20
+  Start timestamp  : 2026-09-08T20:42:51.455719
+  End timestamp    : 2026-09-08T20:43:18.592740
+
+  LATENCY STATISTICS (ms)
+    Mean   : 1053.45 ms
+    Median : 995.11 ms
+    Min    : 580.27 ms
+    Max    : 1942.91 ms
+    StdDev : 281.64 ms
+
+  THROUGHPUT
+    Images/second : 0.9493
+
+  RESOURCE USAGE
+    Mean CPU%  : 24.4%
+    Mean RAM   : 541.7 MB
+    Monitor Mean CPU% : 24.2%
+    Monitor Max CPU%  : 33.8%
+    Monitor Mean RAM  : 673.0 MB
+    Monitor Max RAM   : 1462.9 MB
+
+  SYSTEM INFO
+    Platform        : Windows-11-10.0.26200-SP0
+    CPU cores (L/P) : 8 / 4
+    Total RAM       : 15648 MB
+
+  PER-IMAGE RESULTS
+  Image ID          Total(ms)       CPU%    RAM(MB)  Quality                     Prediction
+  ------------------------------------------------------------------------------------------
+  4f0866b90c27         1093.6       24.2      535.5     PASS                      PDR (93%)
+  fe674c2f73f5          918.6       25.5      554.6     PASS                Mild NPDR (98%)
+  165634a6167e         1127.9       27.2      544.8     PASS                   No DR (100%)
+  b16dd4483ca5          829.0       31.7      542.5     PASS                   No DR (100%)
+  1a7e3356b39c         1942.9       27.4      531.7     PASS                      PDR (90%)
+  521d3e264d71          580.3       22.7      537.5     PASS                      PDR (55%)
+  9782c0489eca          869.9       19.0      547.2     PASS            Moderate NPDR (50%)
+  49a4765f8822         1229.2       25.4      538.9     PASS            Moderate NPDR (89%)
+  58184d6fd087          864.8       24.6      552.1     PASS                Mild NPDR (51%)
+  5c7ab966a3ee          974.2       23.1      545.1     PASS                      PDR (99%)
+  54bdcdecd8f3          801.8       32.8      543.0     PASS                    No DR (99%)
+  d6e26fe51dce         1243.5       22.4      533.1     PASS            Moderate NPDR (64%)
+  a4d41c495666         1105.1       21.7      533.2     PASS            Moderate NPDR (72%)
+  0cb14014117d         1426.0       25.6      533.2     PASS            Moderate NPDR (61%)
+  6d454444f17c          939.0       24.1      542.0     PASS            Moderate NPDR (46%)
+  3ac3fbfca7d4         1195.8       19.3      534.0     PASS                      PDR (90%)
+  080f66eedfb9          887.2       22.8      548.2     PASS                Mild NPDR (89%)
+  3461dc601cc2         1051.9       21.6      543.5     PASS            Moderate NPDR (81%)
+  78b3f819dcc5          972.6       23.5      548.1     PASS            Moderate NPDR (45%)
+  d473f6fafba0         1016.0       24.4      545.2     PASS            Moderate NPDR (66%)
+
+======================================================================
+Prototype Benchmark Results - Scenario C (Poor-Connectivity Simulation)
+======================================================================
+Description  : Poor-connectivity simulation: outbound TCP is blocked via a near-zero socket timeout during inferenc
+Hardware Note: SIMULATED poor-connectivity (socket timeout=0.001s during inference). Core local inference proved network-independent.
+
+  Warmup images    : 5
+  Measured images  : 20
+  Start timestamp  : 2026-09-08T20:43:19.082352
+  End timestamp    : 2026-09-08T20:43:41.118660
+
+  LATENCY STATISTICS (ms)
+    Mean   : 860.73 ms
+    Median : 834.23 ms
+    Min    : 446.30 ms
+    Max    : 1678.22 ms
+    StdDev : 253.44 ms
+
+  THROUGHPUT
+    Images/second : 1.1618
+
+  RESOURCE USAGE
+    Mean CPU%  : 42.5%
+    Mean RAM   : 545.2 MB
+    Monitor Mean CPU% : 38.9%
+    Monitor Max CPU%  : 66.5%
+    Monitor Mean RAM  : 755.0 MB
+    Monitor Max RAM   : 1464.4 MB
+
+  SYSTEM INFO
+    Platform        : Windows-11-10.0.26200-SP0
+    CPU cores (L/P) : 8 / 4
+    Total RAM       : 15648 MB
+
+  PER-IMAGE RESULTS
+  Image ID          Total(ms)       CPU%    RAM(MB)  Quality                     Prediction
+  ------------------------------------------------------------------------------------------
+  4f0866b90c27          838.3       35.5      537.0     PASS                      PDR (93%)
+  fe674c2f73f5          719.6       40.2      549.0     PASS                Mild NPDR (98%)
+  165634a6167e          883.8       32.6      570.8     PASS                   No DR (100%)
+  b16dd4483ca5          589.6       45.4      543.2     PASS                   No DR (100%)
+  1a7e3356b39c         1678.2       33.0      531.3     PASS                      PDR (90%)
+  521d3e264d71          446.3       65.1      537.5     PASS                      PDR (55%)
+  9782c0489eca          802.3       55.2      542.7     PASS            Moderate NPDR (50%)
+  49a4765f8822         1059.1       39.5      559.6     PASS            Moderate NPDR (89%)
+  58184d6fd087          719.6       45.8      572.7     PASS                Mild NPDR (51%)
+  5c7ab966a3ee          811.7       47.1      544.3     PASS                      PDR (99%)
+  54bdcdecd8f3          640.4       50.5      543.7     PASS                    No DR (99%)
+  d6e26fe51dce         1044.6       37.8      532.4     PASS            Moderate NPDR (64%)
+  a4d41c495666          862.4       38.2      544.1     PASS            Moderate NPDR (72%)
+  0cb14014117d         1105.9       36.8      539.6     PASS            Moderate NPDR (61%)
+  6d454444f17c          702.8       39.6      541.9     PASS            Moderate NPDR (46%)
+  3ac3fbfca7d4         1047.7       43.4      532.9     PASS                      PDR (90%)
+  080f66eedfb9          728.9       48.5      541.6     PASS                Mild NPDR (89%)
+  3461dc601cc2          851.7       34.5      551.9     PASS            Moderate NPDR (81%)
+  78b3f819dcc5          830.1       44.6      543.7     PASS            Moderate NPDR (45%)
+  d473f6fafba0          851.4       37.4      543.9     PASS            Moderate NPDR (66%)
+
+======================================================================
+END OF REPORT
+======================================================================
