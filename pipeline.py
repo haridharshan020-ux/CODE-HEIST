@@ -22,8 +22,11 @@ Research/Prototype: Decision support prototype, not an autonomous diagnostic rep
 """
 
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 import time
+import tempfile
+import uuid
+import atexit
 import torch
 from PIL import Image
 
@@ -47,8 +50,20 @@ class DRScreeningPipeline:
     ):
         root = Path(__file__).parent.resolve()
         self.checkpoint_path = Path(checkpoint_path or (root / "checkpoints" / "best_model_combined_v1.pth"))
-        self.output_dir = Path(output_dir or (root / "outputs" / "pipeline"))
+        
+        # Privacy & Storage Protection:
+        # Use session-scoped temporary directory if output_dir is not explicitly specified.
+        # Avoids permanently accumulating patient retinal images / Grad-CAM outputs on disk.
+        if output_dir:
+            self.output_dir = Path(output_dir)
+            self._is_custom_output_dir = True
+        else:
+            self.output_dir = Path(tempfile.gettempdir()) / "code_heist_screening_temp"
+            self._is_custom_output_dir = False
+
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._temp_files: List[Path] = []
+        atexit.register(self.cleanup_temp_files)
 
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -60,6 +75,17 @@ class DRScreeningPipeline:
         if not self.checkpoint_path.exists():
             raise FileNotFoundError(f"Model checkpoint not found at: {self.checkpoint_path}")
         self.gradcam = GradCAM(checkpoint_path=self.checkpoint_path, device=self.device)
+
+    def cleanup_temp_files(self) -> None:
+        """Removes temporary visualization files generated during the session."""
+        if not self._is_custom_output_dir:
+            for p in list(self._temp_files):
+                try:
+                    if p.exists():
+                        p.unlink()
+                except Exception:
+                    pass
+            self._temp_files.clear()
 
     def process(
         self,
@@ -139,11 +165,23 @@ class DRScreeningPipeline:
 
             gradcam_saved_path = None
             if generate_gradcam and save_visualizations:
-                stem = Path(image_name).stem
-                out_name = f"pipeline_{stem}_class{pred_class}.png"
+                # Privacy protection: Use random UUID token instead of original uploaded filename
+                rand_token = uuid.uuid4().hex[:12]
+                out_name = f"gradcam_{rand_token}_class{pred_class}.png"
                 out_file = self.output_dir / out_name
                 self.gradcam.save_visualization(cam_res, out_file, mode="side_by_side")
                 gradcam_saved_path = str(out_file)
+
+                # Manage temporary files: keep bounded retention
+                if not self._is_custom_output_dir:
+                    self._temp_files.append(out_file)
+                    if len(self._temp_files) > 5:
+                        old_file = self._temp_files.pop(0)
+                        try:
+                            if old_file.exists():
+                                old_file.unlink()
+                        except Exception:
+                            pass
 
         except Exception as e:
             return self._error_response(
