@@ -19,6 +19,15 @@ UI Change Log:
     CSS uses only: standard HTML element selectors, Streamlit data-testid
     attributes confirmed present in Streamlit 1.63.0 AppTest API, and
     @media queries. No internal st-emotion-cache-* class names used.
+  - v1.2 (2026-09-15): Phase 1 Step 2 — Confidence handling + Human-in-the-Loop UI.
+    - Explicit AI SCREENING RESULT / EXPLAINABILITY / REFERRAL SUPPORT / CLINICAL REVIEW sections.
+    - Model confidence band (High/Moderate/Low) displayed as prototype engineering bands.
+    - Uncalibrated confidence notice added inline.
+    - Low-confidence caution message added.
+    - Grad-CAM explainability notice clarified.
+    - Referral support clearly separated from AI prediction.
+    - Clinical review notice added as a mandatory final section.
+    - Zero changes to pipeline.py, model, quality gate, referral engine, or Grad-CAM.
 """
 
 from pathlib import Path
@@ -173,11 +182,45 @@ img {
 </style>
 """, unsafe_allow_html=True)
 
+
+# ── Confidence Band Helper ─────────────────────────────────────────────────
+# PROTOTYPE ENGINEERING BANDS — NOT CLINICALLY VALIDATED.
+# These bands (High >= 75%, Moderate 50-74.99%, Low < 50%) are engineering
+# thresholds for UI display purposes only. They are NOT clinical confidence
+# thresholds, have not been validated against expert graders, and MUST NOT
+# be described as clinically validated certainty levels.
+_CONF_HIGH_THRESHOLD = 0.75   # prototype engineering threshold
+_CONF_MOD_THRESHOLD = 0.50    # prototype engineering threshold
+
+
+def _confidence_band(confidence_0_to_1: float) -> tuple:
+    """
+    Returns (band_label, caution_message_or_None) for a given confidence in [0,1].
+
+    PROTOTYPE ENGINEERING BANDS — NOT CLINICALLY VALIDATED.
+    Returns:
+        band_label: "High model confidence" | "Moderate model confidence" | "Low model confidence"
+        caution_msg: None for High/Moderate, caution string for Low.
+    """
+    if confidence_0_to_1 >= _CONF_HIGH_THRESHOLD:
+        return "High model confidence", None
+    elif confidence_0_to_1 >= _CONF_MOD_THRESHOLD:
+        return "Moderate model confidence", None
+    else:
+        return (
+            "Low model confidence",
+            "Low model confidence. Results are less reliable — consider repeat imaging and/or specialist review."
+        )
+
+
 # ── Header & Mandatory Clinical Disclaimer ─────────────────────────────────
 st.title("👁️ Retinal DR Screening System")
 st.caption("AI-assisted Decision Support for Rural Health Centers | SIH 2026")
 
-st.info("⚠️ **Clinical Disclaimer:** AI screening result — not a clinical diagnosis.")
+st.info(
+    "**Clinical Disclaimer:** This tool provides AI-assisted decision support only. "
+    "It is NOT a clinical diagnosis. All outputs require review by a qualified clinician."
+)
 
 # ── Pipeline Caching ───────────────────────────────────────────────────────
 DEFAULT_CHECKPOINT = Path(__file__).parent.resolve() / "checkpoints" / "best_model_combined_v1.pth"
@@ -220,44 +263,67 @@ if uploaded_file is not None:
 
         if quality and quality["quality_ok"]:
             st.success(
-                f"✅ **Quality Acceptable** (Score: {quality['quality_score']}/100) — "
+                f"Quality Acceptable (Score: {quality['quality_score']}/100) — "
                 f"{quality['recommendation']}"
             )
         else:
             q_score = quality["quality_score"] if quality else 0.0
-            st.error(f"❌ **Quality Inadequate** (Score: {q_score}/100)")
-            st.warning(
-                "⚠️ **Action Required:** Please recapture image with better "
+            st.error(f"Quality Inadequate (Score: {q_score}/100)")
+            # Use primary_failure_reason from Step 1 if available
+            failure_reason = (quality or {}).get("primary_failure_reason", "")
+            recapture_msg = (
+                "Action Required: Please recapture image with better "
                 "focus, illumination, or field of view."
             )
+            if failure_reason:
+                recapture_msg = f"Action Required: {failure_reason} Please recapture image."
+            st.warning(recapture_msg)
             if quality and quality["warnings"]:
                 st.write("**Detected Issues:**")
                 for w in quality["warnings"]:
                     st.write(f"- {w}")
-            # Stop execution immediately as required by quality gate logic
+            # Quality gate interlock: stop all downstream output
             st.stop()
 
-        # ── 3. Screening Prediction ────────────────────────────────────────
-        st.subheader("3. Screening Prediction")
+        # ══════════════════════════════════════════════════════════════════
+        # ── 3. AI SCREENING RESULT ────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════
+        st.divider()
+        st.subheader("3. AI Screening Result")
+
         pred = result["prediction"]
         conf_pct = pred["confidence"] * 100.0
+        band_label, caution_msg = _confidence_band(pred["confidence"])
 
-        # Two metrics side-by-side on desktop; they auto-stack on mobile
-        # because the CSS sets width:100% and flex-wrap on narrow viewports.
-        col1, col2 = st.columns(2)
+        # Three metrics: severity / model confidence / confidence band
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Predicted Severity", f"Class {pred['class']} ({pred['severity']})")
         with col2:
             st.metric("Model Confidence", f"{conf_pct:.2f}%")
+        with col3:
+            st.metric("Confidence Band", band_label)
 
-        st.divider()
-
-        # ── 4. Visual Attention (Grad-CAM) ─────────────────────────────────
-        st.subheader("4. Visual Attention (Grad-CAM)")
+        # Mandatory uncalibrated-confidence notice
         st.caption(
-            "Highlighted areas show regions receiving stronger model attention for the "
-            "predicted class. This provides visual explainability and does NOT constitute "
-            "clinical proof of lesions."
+            "Model confidence is an uncalibrated model output and is not a clinical probability. "
+            "It reflects the model's output score for the predicted class, not a medically validated "
+            "likelihood of disease. Confidence band thresholds are prototype engineering values only."
+        )
+
+        # Low-confidence caution (only shown when applicable)
+        if caution_msg:
+            st.warning(f"Low model confidence: {caution_msg}")
+
+        # ══════════════════════════════════════════════════════════════════
+        # ── 4. Explainability (Grad-CAM) ─────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════
+        st.divider()
+        st.subheader("4. Explainability (Grad-CAM)")
+        st.caption(
+            "Grad-CAM highlights image regions that influenced the model's prediction for the predicted class. "
+            "This is a visual explanation of model attention only — it does NOT prove the presence of a lesion "
+            "or constitute clinical evidence of disease."
         )
 
         exp = result["explainability"]
@@ -275,10 +341,17 @@ if uploaded_file is not None:
         else:
             st.info("Grad-CAM explanation was not generated.")
 
+        # ══════════════════════════════════════════════════════════════════
+        # ── 5. Referral Support ───────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════
         st.divider()
+        st.subheader("5. Referral Support")
+        st.caption(
+            "The referral support output below is decision-support information intended to assist "
+            "healthcare workers. It is NOT an autonomous clinical decision, a confirmed diagnosis, "
+            "or a treatment plan."
+        )
 
-        # ── 5. Referral-Support Recommendation ────────────────────────────
-        st.subheader("5. Referral-Support Recommendation")
         ref = result["referral"]
         priority = ref["referral_priority"]
 
@@ -290,16 +363,30 @@ if uploaded_file is not None:
             st.error(f"**Referral Priority:** {priority}")
 
         st.write(f"**Action Pathway:** {ref['action_pathway']}")
-        st.write(f"**Clinical Recommendation:** {ref['recommendation']}")
+        st.write(f"**Referral Recommendation:** {ref['recommendation']}")
 
         if ref["warnings"]:
             for w in ref["warnings"]:
                 st.caption(f"Note: {w}")
 
-        # ── 6. Latency & Metadata ──────────────────────────────────────────
+        st.caption(f"Disclaimer: {ref['disclaimer']}")
+
+        # ══════════════════════════════════════════════════════════════════
+        # ── 6. Clinical Review Notice ─────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════
+        st.divider()
+        st.subheader("6. Clinical Review")
+        st.info(
+            "Final interpretation of this screening result must be made by an appropriately "
+            "trained clinician. This tool provides AI-assisted decision support only. "
+            "It is not a substitute for clinical examination, expert ophthalmological assessment, "
+            "or locally approved diagnostic protocols."
+        )
+
+        # ── 7. Latency & Metadata ──────────────────────────────────────────
         st.divider()
         st.caption(
-            f"⚡ Processing time: {result['processing_time_sec']:.2f}s "
+            f"Processing time: {result['processing_time_sec']:.2f}s "
             f"| Device: {pipeline.device} | Fully Offline"
         )
         st.caption("Checkpoint: best_model_combined_v1.pth")
