@@ -1,4 +1,4 @@
-﻿"""
+"""
 quality_assessment.py
 ---------------------
 Heuristic Image Quality Assessment for Fundus Images (Research/Prototype).
@@ -19,9 +19,15 @@ Design:
   - Fully configurable thresholds via QualityConfig dataclass.
   - Graceful handling of corrupted/missing/invalid images.
   - Standard library, PIL, numpy, and scipy only (no heavy/unnecessary dependencies).
+  - Returns structured result with explicit outcome field: GOOD_QUALITY or RECAPTURE_REQUIRED.
+
+Phase 1 Quality Gate Strengthening (phase1-strengthening branch):
+  - Threshold adjustments documented below as prototype engineering changes.
+  - Added explicit outcome field (GOOD_QUALITY / RECAPTURE_REQUIRED).
+  - Added primary_failure_reason field for explainability.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Any, Union
 import numpy as np
@@ -29,30 +35,64 @@ from PIL import Image
 from scipy.ndimage import laplace
 
 
+# Outcome constants for clarity in downstream consumers (pipeline.py, app.py).
+OUTCOME_GOOD = "GOOD_QUALITY"
+OUTCOME_RECAPTURE = "RECAPTURE_REQUIRED"
+
+
 @dataclass
 class QualityConfig:
-    """Configurable thresholds for retinal image quality assessment."""
+    """Configurable thresholds for retinal image quality assessment.
+
+    PROTOTYPE ENGINEERING THRESHOLDS — NOT CLINICALLY VALIDATED
+    -------------------------------------------------------------
+    All numeric thresholds are prototype engineering parameters derived from
+    empirical observation on a sample of APTOS 2019 fundus images and basic
+    image-processing analysis.  They are NOT clinically validated gradability
+    criteria and have NOT been evaluated against expert grader agreement.
+    They MUST NOT be described as clinical quality standards.
+
+    Threshold change log (phase1-strengthening branch):
+      min_blur_score: 3.0 → 5.0
+        Rationale: Laplacian-variance scores in the 3–5 range (empirically
+        produced by GaussianBlur radius ~4–5 on APTOS images) correspond to
+        visibly soft images where fine vascular structures are degraded.
+        Raising this minimum is a conservative engineering adjustment.
+
+      optimal_blur_score: 20.0 → 25.0
+        Rationale: Adjusted upward proportionally so the subscore ramp
+        remains well-calibrated (real APTOS images score ~16–64 on this
+        metric; the optimal anchor is now 25 rather than 20).
+
+      max_foreground_brightness: 215.0 → 200.0
+        Rationale: Mean foreground pixel values ≥ 200/255 empirically
+        correspond to visibly overexposed / washed-out fundus images where
+        retinal vascular contrast is degraded.  200 is still a conservative
+        threshold (55 units below the 255 ceiling).
+    """
     min_width: int = 512
     min_height: int = 512
-    
-    # Sharpness / Blur: Laplacian variance on standard resized 512x512 image
-    min_blur_score: float = 3.0       # below this is severely blurred / out-of-focus
-    optimal_blur_score: float = 20.0   # score giving 100% blur subscore
-    
-    # Illumination / Brightness (foreground retinal region 0-255 scale)
-    min_foreground_brightness: float = 30.0   # underexposed / dark
-    max_foreground_brightness: float = 215.0  # overexposed / washed out
+
+    # Sharpness / Blur: Laplacian variance on standardised 512×512 image.
+    # PROTOTYPE ENGINEERING THRESHOLD — not clinically validated.
+    min_blur_score: float = 5.0        # below this → severely blurred / out-of-focus
+    optimal_blur_score: float = 25.0   # score giving 100% blur subscore
+
+    # Illumination / Brightness (foreground retinal region, 0-255 scale).
+    # PROTOTYPE ENGINEERING THRESHOLD — not clinically validated.
+    min_foreground_brightness: float = 30.0    # underexposed / dark
+    max_foreground_brightness: float = 200.0   # overexposed / washed out
     optimal_brightness_low: float = 55.0
     optimal_brightness_high: float = 145.0
-    
+
     # Contrast (standard deviation in foreground region)
-    min_contrast: float = 8.0          # flat, uninformative contrast
+    min_contrast: float = 8.0           # flat, uninformative contrast
     optimal_contrast: float = 22.0
-    
+
     # Field of View (FOV: fraction of image area occupied by fundus foreground)
-    min_fov_ratio: float = 0.20        # less than 20% indicates off-center or non-retinal image
+    min_fov_ratio: float = 0.20         # < 20% → off-center or non-retinal image
     optimal_fov_ratio: float = 0.60
-    
+
     # Minimum overall score (0-100) to pass quality check
     pass_threshold_score: float = 60.0
 
@@ -194,7 +234,7 @@ class RetinalQualityAssessor:
         total_score = round(float(np.clip(total_score, 0.0, 100.0)), 1)
 
         # Determine pass/fail
-        # Must exceed threshold score AND have no critical failure
+        # Must exceed threshold score AND have no critical failure in any individual signal.
         critical_failure = (
             fg_mean_brightness < self.config.min_foreground_brightness or
             fg_mean_brightness > self.config.max_foreground_brightness or
@@ -203,6 +243,25 @@ class RetinalQualityAssessor:
         )
         quality_ok = (total_score >= self.config.pass_threshold_score) and not critical_failure
 
+        # Determine the single most important failure reason for the user
+        # (shown in UI when quality fails — prototype engineering labels only).
+        primary_failure_reason = None
+        if not quality_ok:
+            if fg_lap_var < self.config.min_blur_score:
+                primary_failure_reason = f"Image is out of focus or blurry (sharpness: {fg_lap_var:.1f})."
+            elif fg_mean_brightness < self.config.min_foreground_brightness:
+                primary_failure_reason = f"Image is too dark / underexposed (brightness: {fg_mean_brightness:.1f}/255)."
+            elif fg_mean_brightness > self.config.max_foreground_brightness:
+                primary_failure_reason = f"Image is overexposed / washed out (brightness: {fg_mean_brightness:.1f}/255)."
+            elif fov_ratio < self.config.min_fov_ratio:
+                primary_failure_reason = f"Insufficient retinal field of view ({fov_ratio*100:.1f}%). Recentre the camera."
+            elif fg_contrast < self.config.min_contrast:
+                primary_failure_reason = f"Insufficient image contrast ({fg_contrast:.1f}). Adjust illumination."
+            else:
+                primary_failure_reason = f"Overall image quality score too low ({total_score}/100)."
+
+        outcome = OUTCOME_GOOD if quality_ok else OUTCOME_RECAPTURE
+
         if quality_ok:
             recommendation = "Image quality acceptable for screening."
         else:
@@ -210,7 +269,9 @@ class RetinalQualityAssessor:
 
         return {
             "quality_ok": bool(quality_ok),
+            "outcome": outcome,
             "quality_score": total_score,
+            "primary_failure_reason": primary_failure_reason,
             "resolution": (w, h),
             "blur_score": round(fg_lap_var, 2),
             "brightness_score": round(fg_mean_brightness, 2),
@@ -230,7 +291,9 @@ class RetinalQualityAssessor:
     def _failure_result(self, reason: str, warnings: List[str] = None) -> Dict[str, Any]:
         return {
             "quality_ok": False,
+            "outcome": OUTCOME_RECAPTURE,
             "quality_score": 0.0,
+            "primary_failure_reason": reason,
             "resolution": (0, 0),
             "blur_score": 0.0,
             "brightness_score": 0.0,
