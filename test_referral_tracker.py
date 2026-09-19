@@ -98,6 +98,8 @@ def run_tests():
         load_records,
         update_status,
         export_csv,
+        format_record_for_export,
+        EXPORT_COLUMNS,
         VALID_STATUSES,
         TrackerRecord,
     )
@@ -297,20 +299,20 @@ def run_tests():
     finally:
         safe_unlink(db)
 
-    # â”€â”€ TEST 7: export_csv() produces valid CSV â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    separator("TEST 7: export_csv() produces valid CSV with correct headers and row count")
+    # ── TEST 7: export_csv() produces clean human-readable CSV ─────────────
+    separator("TEST 7: export_csv() produces clean CSV with exact column order and formatting")
     db = make_temp_db()
     csv_out = Path(tempfile.mktemp(suffix=".csv"))
     try:
         save_record(
             patient_ref="PHC-EXPORT-1", predicted_class=2, severity="Moderate NPDR",
-            confidence_pct=65.0, confidence_band="Moderate", quality_score=90.0,
+            confidence_pct=65.04, confidence_band="Moderate", quality_score=90.0,
             referral_priority="Semi-urgent", referral_due="Ophthalmic referral",
             recommendation="Scheduled consult.", db_path=db,
         )
         save_record(
             patient_ref="PHC-EXPORT-2", predicted_class=0, severity="No DR",
-            confidence_pct=99.9, confidence_band="High", quality_score=99.0,
+            confidence_pct=98.42, confidence_band="High", quality_score=93.1,
             referral_priority="Routine", referral_due="Annual check",
             recommendation="No DR.", db_path=db,
         )
@@ -323,20 +325,66 @@ def run_tests():
             header = reader.fieldnames
             rows = list(reader)
 
-        expected_cols = [
-            "record_id", "created_at", "patient_ref",
-            "predicted_class", "severity", "confidence_pct",
-            "confidence_band", "quality_score",
-            "referral_priority", "referral_due", "recommendation",
-            "followup_status", "followup_notes", "updated_at",
+        expected_order = [
+            "Patient Reference",
+            "Screening Date",
+            "Screening Time",
+            "DR Severity",
+            "AI Confidence",
+            "Image Quality",
+            "Referral Priority",
+            "Referral Due",
+            "Follow-up Status",
+            "Follow-up Notes",
         ]
-        check(set(header) == set(expected_cols), "CSV has all 14 expected columns")
-        check("referral_due" in header, "referral_due column in CSV")
+        check(header == expected_order, "CSV columns match exact expected order")
+        check(header == EXPORT_COLUMNS, "CSV header matches EXPORT_COLUMNS constant")
+        check("record_id" not in header, "Internal record_id is hidden from CSV")
+        check("predicted_class" not in header, "Internal predicted_class is hidden from CSV")
         check(len(rows) == 2, "CSV has 2 data rows")
-        check(
-            any(r["patient_ref"] == "PHC-EXPORT-1" for r in rows),
-            "PHC-EXPORT-1 in CSV rows"
+
+        # Verify formatting on row 1
+        r1 = [r for r in rows if r["Patient Reference"] == "PHC-EXPORT-1"][0]
+        check(r1["DR Severity"] == "Moderate NPDR", "Severity preserved")
+        check(r1["AI Confidence"] == "65.0%", f"Confidence formatted as percentage: {r1['AI Confidence']}")
+        check(r1["Image Quality"] == "90.0/100", f"Image quality formatted as score/100: {r1['Image Quality']}")
+        check(r1["Referral Priority"] == "Semi-urgent", "Priority preserved")
+        check(r1["Referral Due"] == "Ophthalmic referral", "Referral due preserved")
+        check(r1["Follow-up Status"] == "Pending", "Follow-up status preserved")
+        check(len(r1["Screening Date"]) == 10 and r1["Screening Date"][2] == "-" and r1["Screening Date"][5] == "-",
+              f"Date formatted as DD-MM-YYYY: {r1['Screening Date']}")
+        check(len(r1["Screening Time"]) == 5 and r1["Screening Time"][2] == ":",
+              f"Time formatted as HH:MM: {r1['Screening Time']}")
+
+        # Verify formatting on row 2 (confidence e.g. 98.4%, quality e.g. 93.1/100)
+        r2 = [r for r in rows if r["Patient Reference"] == "PHC-EXPORT-2"][0]
+        check(r2["AI Confidence"] == "98.4%", f"Confidence formatted as 98.4%: {r2['AI Confidence']}")
+        check(r2["Image Quality"] == "93.1/100", f"Image quality formatted as 93.1/100: {r2['Image Quality']}")
+
+        # Direct verification of format_record_for_export with fixed timestamp
+        test_rec = TrackerRecord(
+            record_id="dummy_id",
+            created_at="2026-09-19T05:30:00Z",
+            patient_ref="PHC-DIRECT-01",
+            predicted_class=1,
+            severity="Mild NPDR",
+            confidence_pct=98.4,
+            confidence_band="High",
+            quality_score=93.1,
+            referral_priority="Routine / Clinical Review",
+            referral_due="Primary care review",
+            recommendation="Mild signs detected.",
+            followup_status="Pending",
+            followup_notes="Test notes",
+            updated_at="",
         )
+        formatted = format_record_for_export(test_rec)
+        check(list(formatted.keys()) == expected_order, "format_record_for_export keys match exact order")
+        check(formatted["Screening Date"] == "19-09-2026", f"Screening Date matches 19-09-2026: {formatted['Screening Date']}")
+        check(formatted["Screening Time"] == "05:30", f"Screening Time matches 05:30: {formatted['Screening Time']}")
+        check(formatted["AI Confidence"] == "98.4%", "AI Confidence matches 98.4%")
+        check(formatted["Image Quality"] == "93.1/100", "Image Quality matches 93.1/100")
+        check(formatted["Follow-up Notes"] == "Test notes", "Follow-up Notes preserved")
     finally:
         safe_unlink(db)
         safe_unlink(csv_out)

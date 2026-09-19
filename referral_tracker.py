@@ -266,12 +266,75 @@ def update_status(
         conn.commit()
 
 
+# ── CSV Export Configuration ────────────────────────────────────────────────
+# Clean, human-readable column headers for rural healthcare workers.
+# Preserves underlying database values and column mapping.
+EXPORT_COLUMNS = [
+    "Patient Reference",
+    "Screening Date",
+    "Screening Time",
+    "DR Severity",
+    "AI Confidence",
+    "Image Quality",
+    "Referral Priority",
+    "Referral Due",
+    "Follow-up Status",
+    "Follow-up Notes",
+]
+
+
+def _format_date_time(created_at: str) -> tuple:
+    """
+    Parse ISO-8601 created_at string and return (DD-MM-YYYY, HH:MM).
+    Fallback gracefully if parsing fails or string is empty.
+    """
+    if not created_at:
+        return ("", "")
+    try:
+        clean_ts = created_at.rstrip("Z")
+        dt = datetime.fromisoformat(clean_ts)
+        return (dt.strftime("%d-%m-%Y"), dt.strftime("%H:%M"))
+    except Exception:
+        if len(created_at) >= 10 and created_at[4] == "-" and created_at[7] == "-":
+            yyyy, mm, dd = created_at[0:4], created_at[5:7], created_at[8:10]
+            time_part = created_at[11:16] if len(created_at) >= 16 else ""
+            return (f"{dd}-{mm}-{yyyy}", time_part)
+        return (created_at, "")
+
+
+def format_record_for_export(rec: TrackerRecord) -> dict:
+    """
+    Format a TrackerRecord into a clean, human-readable dictionary
+    suitable for rural healthcare worker CSV export.
+
+    Formatting:
+      - Hide internal record_id and predicted_class
+      - Format confidence as percentage, e.g. 98.4%
+      - Format image quality as score/100, e.g. 93.1/100
+      - Format date as DD-MM-YYYY
+      - Format time as HH:MM
+    """
+    date_str, time_str = _format_date_time(rec.created_at)
+    return {
+        "Patient Reference": rec.patient_ref,
+        "Screening Date": date_str,
+        "Screening Time": time_str,
+        "DR Severity": rec.severity,
+        "AI Confidence": f"{float(rec.confidence_pct):.1f}%",
+        "Image Quality": f"{float(rec.quality_score):.1f}/100",
+        "Referral Priority": rec.referral_priority,
+        "Referral Due": rec.referral_due,
+        "Follow-up Status": rec.followup_status,
+        "Follow-up Notes": rec.followup_notes,
+    }
+
+
 def export_csv(
     out_path: Path,
     db_path: Optional[Path] = None,
 ) -> int:
     """
-    Export all records to a CSV file at out_path.
+    Export all records to a clean, human-readable CSV file at out_path.
     Returns the number of rows exported.
     All data stays local — no network operations.
     """
@@ -282,24 +345,9 @@ def export_csv(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(out_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=_COLUMNS)
+        writer = csv.DictWriter(f, fieldnames=EXPORT_COLUMNS)
         writer.writeheader()
         for rec in records:
-            writer.writerow({
-                "record_id": rec.record_id,
-                "created_at": rec.created_at,
-                "patient_ref": rec.patient_ref,
-                "predicted_class": rec.predicted_class,
-                "severity": rec.severity,
-                "confidence_pct": rec.confidence_pct,
-                "confidence_band": rec.confidence_band,
-                "quality_score": rec.quality_score,
-                "referral_priority": rec.referral_priority,
-                "referral_due": rec.referral_due,
-                "recommendation": rec.recommendation,
-                "followup_status": rec.followup_status,
-                "followup_notes": rec.followup_notes,
-                "updated_at": rec.updated_at,
-            })
+            writer.writerow(format_record_for_export(rec))
 
     return len(records)

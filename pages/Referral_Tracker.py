@@ -26,11 +26,13 @@ import streamlit as st
 
 from referral_tracker import (
     VALID_STATUSES,
+    EXPORT_COLUMNS,
     default_db_path,
     init_db,
     load_records,
     update_status,
     export_csv,
+    format_record_for_export,
 )
 
 # ── Page config ────────────────────────────────────────────────────────────
@@ -205,32 +207,10 @@ if st.button("Export to CSV", key="export_btn"):
             # Build CSV in memory using stdlib
             import csv as _csv
             buf = io.StringIO()
-            fieldnames = [
-                "record_id", "created_at", "patient_ref",
-                "predicted_class", "severity", "confidence_pct",
-                "confidence_band", "quality_score",
-                "referral_priority", "referral_due", "recommendation",
-                "followup_status", "followup_notes", "updated_at",
-            ]
-            writer = _csv.DictWriter(buf, fieldnames=fieldnames)
+            writer = _csv.DictWriter(buf, fieldnames=EXPORT_COLUMNS)
             writer.writeheader()
             for rec in all_records:
-                writer.writerow({
-                    "record_id": rec.record_id,
-                    "created_at": rec.created_at,
-                    "patient_ref": rec.patient_ref,
-                    "predicted_class": rec.predicted_class,
-                    "severity": rec.severity,
-                    "confidence_pct": rec.confidence_pct,
-                    "confidence_band": rec.confidence_band,
-                    "quality_score": rec.quality_score,
-                    "referral_priority": rec.referral_priority,
-                    "referral_due": rec.referral_due,
-                    "recommendation": rec.recommendation,
-                    "followup_status": rec.followup_status,
-                    "followup_notes": rec.followup_notes,
-                    "updated_at": rec.updated_at,
-                })
+                writer.writerow(format_record_for_export(rec))
             csv_bytes = buf.getvalue().encode("utf-8")
             st.download_button(
                 label=f"Download referral_tracker_export.csv ({len(all_records)} records)",
