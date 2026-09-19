@@ -394,9 +394,9 @@ def run_tests():
         "TEST 9: 'Save to Referral Tracker' not shown before screening"
     )
 
-    # TEST 10: Save section present after good-quality screening
-    print("\n  [Test 10] Good image â†’ Save to Tracker section appears...")
-    at_good = AppTest.from_file("app.py", default_timeout=60)
+    # TEST 10: No DR condition (Class 0: 165634a6167e.png)
+    print("\n  [Test 10] Good image Class 0 (No DR) -> No referral required notice...")
+    at_good = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
     at_good.run()
     at_good.file_uploader[0].upload("165634a6167e.png", good_bytes.getvalue()).run()
     at_good.button[0].click().run()
@@ -404,31 +404,78 @@ def run_tests():
     subheaders_good = [s.value for s in at_good.subheader]
     print(f"  Subheaders after screening: {subheaders_good}")
     check(
-        any("Save to Referral Tracker" in s for s in subheaders_good),
-        "TEST 10: 'Save to Referral Tracker' subheader present after screening"
+        any("Referral Follow-up Tracker" in s for s in subheaders_good),
+        "TEST 10: 'Referral Follow-up Tracker' subheader present after screening"
     )
-    # All previous sections still present
-    check(any("AI Screening Result" in s for s in subheaders_good),
-          "TEST 10: AI Screening Result section still present")
-    check(any("Clinical Review" in s for s in subheaders_good),
-          "TEST 10: Clinical Review section still present")
+    # Check No DR specific content
+    infos_good = [i.value for i in at_good.info]
+    check(
+        any("No referral required" in i for i in infos_good),
+        "TEST 10: 'No referral required' clearly displayed for Class 0"
+    )
+    check(
+        any("Routine follow-up according to local clinical protocol" in i for i in infos_good),
+        "TEST 10: 'Routine follow-up according to local clinical protocol' displayed"
+    )
+    # Check that the save button is NOT present for No DR
+    buttons_good = [b.label for b in at_good.button]
+    check(
+        "Save Screening to Tracker" not in buttons_good,
+        "TEST 10: Save form button NOT offered for Class 0 (No DR)"
+    )
 
-    # TEST 11: Quality failure â€” no tracker section (st.stop fires)
-    print("\n  [Test 11] Quality failure â†’ Tracker section NOT shown...")
+    # TEST 10b: Referral Case (Class 1: fe674c2f73f5.png) -> Tracker form offered & saves
+    print("\n  [Test 10b] Referral Case Class 1 (Mild NPDR) -> Save form offered & saves to DB...")
+    ref_img_path = IMAGES_DIR / "fe674c2f73f5.png"
+    ref_img = Image.open(ref_img_path)
+    ref_bytes = io.BytesIO()
+    ref_img.save(ref_bytes, format="PNG")
+    ref_bytes.seek(0)
+
+    at_ref = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
+    at_ref.run()
+    at_ref.file_uploader[0].upload("fe674c2f73f5.png", ref_bytes.getvalue()).run()
+    at_ref.button[0].click().run()
+    assert not at_ref.exception, f"Exception during screening: {at_ref.exception}"
+
+    buttons_ref = [b.label for b in at_ref.button]
+    check(
+        "Save Screening to Tracker" in buttons_ref,
+        "TEST 10b: 'Save Screening to Tracker' button present for referral case"
+    )
+    # Fill in patient_ref and click save
+    at_ref.text_input(key="tracker_patient_ref").input("PHC-APPTEST-REF01")
+    save_idx = [i for i, b in enumerate(at_ref.button) if b.label == "Save Screening to Tracker"][0]
+    at_ref.button[save_idx].click().run()
+
+    success_ref = [s.value for s in at_ref.success]
+    print(f"  Success messages after save: {success_ref}")
+    check(
+        any("Saved to tracker" in s and "Pending" in s for s in success_ref),
+        "TEST 10b: Saved to tracker success message with Pending status displayed"
+    )
+    recs_after_save = load_records()
+    check(
+        any(r.patient_ref == "PHC-APPTEST-REF01" for r in recs_after_save),
+        "TEST 10b: Record successfully persisted in local SQLite DB"
+    )
+
+    # TEST 11: Quality failure -> no tracker section (st.stop fires)
+    print("\n  [Test 11] Quality failure -> Tracker section NOT shown...")
     blurred_img = good_img.filter(ImageFilter.GaussianBlur(radius=15))
     blur_bytes = io.BytesIO()
     blurred_img.save(blur_bytes, format="PNG")
     blur_bytes.seek(0)
 
-    at_blur = AppTest.from_file("app.py", default_timeout=60)
+    at_blur = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
     at_blur.run()
     at_blur.file_uploader[0].upload("blurred.png", blur_bytes.getvalue()).run()
     at_blur.button[0].click().run()
     assert not at_blur.exception, f"Exception: {at_blur.exception}"
     subheaders_blur = [s.value for s in at_blur.subheader]
     check(
-        not any("Save to Referral Tracker" in s for s in subheaders_blur),
-        "TEST 11: Save to Referral Tracker NOT shown after quality failure"
+        not any("Referral Follow-up Tracker" in s for s in subheaders_blur),
+        "TEST 11: Referral Follow-up Tracker NOT shown after quality failure"
     )
     check(
         any("Quality Inadequate" in e.value for e in at_blur.error),
@@ -437,8 +484,8 @@ def run_tests():
     check(len(at_blur.metric) == 0,
           "TEST 11: No metrics shown after quality failure")
 
-    # â”€â”€ TEST 12: Tracker page loads without error â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    separator("TEST 12: Referral_Tracker.py page loads without error")
+    # -- TEST 12: Tracker page loads without error & displays saved record --
+    separator("TEST 12: Referral_Tracker.py page loads without error & displays records")
     at_tracker = AppTest.from_file(
         str(ROOT / "pages" / "Referral_Tracker.py"), default_timeout=60
     ).run()
@@ -448,6 +495,11 @@ def run_tests():
     check(
         any("Referral" in t for t in tracker_title),
         "TEST 12: Referral Tracker page renders title without error"
+    )
+    expander_labels = [e.label for e in at_tracker.expander]
+    check(
+        any("PHC-APPTEST-REF01" in el for el in expander_labels),
+        "TEST 12: Referral Tracker page displays saved record in expander"
     )
 
     # â”€â”€ TEST 13: Representative prediction regression â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

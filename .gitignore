@@ -30,7 +30,8 @@ checkpoints/*
 !checkpoints/best_model_combined_v1.pth
 
 # Exclude Objective 10 multi-page UI from cloud deployment while preserving locally
-/pages/
+/pages/*
+!/pages/Referral_Tracker.py
 
 # Local execution logs and runtime output artifacts
 outputs/

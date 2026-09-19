@@ -137,7 +137,7 @@ def _get_connection(db_path: Path) -> sqlite3.Connection:
 
 def default_db_path() -> Path:
     """Returns the default local database path (project root)."""
-    return Path(__file__).parent.resolve() / DB_FILENAME
+    return (Path(__file__).resolve().parent / DB_FILENAME).resolve()
 
 
 def init_db(db_path: Optional[Path] = None) -> None:

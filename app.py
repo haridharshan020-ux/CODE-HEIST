@@ -251,7 +251,18 @@ uploaded_file = st.file_uploader(
     help="Upload an uncompressed or standard fundus photograph.",
 )
 
+# Manage screening session state to persist results across form submissions
+if "screening_result" not in st.session_state:
+    st.session_state["screening_result"] = None
+if "screened_file_name" not in st.session_state:
+    st.session_state["screened_file_name"] = None
+
 if uploaded_file is not None:
+    # If the user selected a different image, invalidate previous result
+    if st.session_state.get("screened_file_name") != uploaded_file.name:
+        st.session_state["screening_result"] = None
+        st.session_state["screened_file_name"] = uploaded_file.name
+
     try:
         pil_image = Image.open(uploaded_file).convert("RGB")
         st.image(pil_image, caption=f"Uploaded: {uploaded_file.name}", use_container_width=True)
@@ -265,7 +276,12 @@ if uploaded_file is not None:
 
     if start_button:
         with st.spinner("Processing retinal scan..."):
-            result = pipeline.process(pil_image, generate_gradcam=True, save_visualizations=True)
+            st.session_state["screening_result"] = pipeline.process(
+                pil_image, generate_gradcam=True, save_visualizations=True
+            )
+
+    if st.session_state.get("screening_result") is not None:
+        result = st.session_state["screening_result"]
 
         st.divider()
 
@@ -396,67 +412,89 @@ if uploaded_file is not None:
         )
 
         # ══════════════════════════════════════════════════════════════════
-        # ── 7. Save to Referral Tracker ───────────────────────────────────
+        # ── 7. Referral Follow-up Tracker ─────────────────────────────────
         # ══════════════════════════════════════════════════════════════════
         st.divider()
-        st.subheader("7. Save to Referral Tracker")
-        st.caption(
-            "Save this screening result to the local offline referral tracker. "
-            "No patient image is stored. All data stays on this device only."
-        )
+        st.subheader("7. Referral Follow-up Tracker")
 
-        # Initialise tracker DB (idempotent)
-        _tracker_db = default_db_path()
-        try:
-            init_db(_tracker_db)
-        except Exception as _db_err:
-            st.warning(f"Tracker DB initialisation failed: {_db_err}")
-            _tracker_db = None
+        pred = result["prediction"]
+        pred_class = int(pred["class"]) if pred else 0
 
-        if _tracker_db is not None:
-            with st.form("save_to_tracker_form", clear_on_submit=True):
-                patient_ref_input = st.text_input(
-                    "Patient Reference ID",
-                    placeholder="e.g. PHC-2026-001 (free text, your local identifier)",
-                    help=(
-                        "Enter a local patient reference for follow-up coordination. "
-                        "Do not enter biometric or national ID numbers."
-                    ),
-                    key="tracker_patient_ref",
-                )
-                save_btn = st.form_submit_button(
-                    "Save Screening to Tracker", type="secondary"
-                )
+        if pred_class == 0:
+            # ── No DR Condition ───────────────────────────────────────────
+            # Do not treat as a referral case.
+            # Do not require worker to create a referral follow-up record.
+            st.info(
+                "**No referral required**\n\n"
+                "Routine follow-up according to local clinical protocol.\n\n"
+                "This screening detected no features of diabetic retinopathy. "
+                "Referral follow-up tracking is only offered when a specialist referral is indicated."
+            )
+        else:
+            # ── Referral Cases (Classes 1–4) ──────────────────────────────
+            st.caption(
+                "Specialist referral / clinical review is recommended. "
+                "Record this referral in the local offline tracker to support continuity of care. "
+                "Follow-up status is maintained manually by the healthcare worker based on "
+                "available follow-up information. No patient image is stored."
+            )
 
-            if save_btn:
-                if not patient_ref_input.strip():
-                    st.error("Please enter a Patient Reference ID before saving.")
-                else:
-                    try:
-                        # Capture referral_due from the existing action_pathway field.
-                        # This is NOT a new clinical rule — it records the existing
-                        # referral engine output verbatim.
-                        _referral_due = ref.get("action_pathway", "")
-                        _band, _ = _confidence_band(pred["confidence"])
-                        _band_short = _band.replace(" model confidence", "").strip()
-                        _rec_id = save_record(
-                            patient_ref=patient_ref_input.strip(),
-                            predicted_class=int(pred["class"]),
-                            severity=pred["severity"],
-                            confidence_pct=round(pred["confidence"] * 100.0, 4),
-                            confidence_band=_band_short,
-                            quality_score=float(quality.get("quality_score", 0.0)),
-                            referral_priority=ref.get("referral_priority", ""),
-                            referral_due=_referral_due,
-                            recommendation=ref.get("recommendation", ""),
-                            db_path=_tracker_db,
-                        )
-                        st.success(
-                            f"Saved to tracker. Record ID: `{_rec_id}` — "
-                            "View in the Referral Tracker page."
-                        )
-                    except Exception as _save_err:
-                        st.error(f"Save failed: {_save_err}")
+            # Initialise tracker DB (idempotent)
+            _tracker_db = default_db_path()
+            try:
+                init_db(_tracker_db)
+            except Exception as _db_err:
+                st.warning(f"Tracker DB initialisation failed: {_db_err}")
+                _tracker_db = None
+
+            if _tracker_db is not None:
+                with st.form("save_to_tracker_form", clear_on_submit=False):
+                    patient_ref_input = st.text_input(
+                        "Patient Reference ID",
+                        placeholder="e.g. PHC-2026-001 (free text, your local identifier)",
+                        help=(
+                            "Enter a local patient reference for follow-up coordination. "
+                            "Do not enter biometric or national ID numbers."
+                        ),
+                        key="tracker_patient_ref",
+                    )
+                    st.caption(
+                        "Initial Status upon saving: **Pending** "
+                        "(referral is recommended; worker has not yet initiated/given the referral)."
+                    )
+                    save_btn = st.form_submit_button(
+                        "Save Screening to Tracker", type="secondary"
+                    )
+
+                if save_btn:
+                    if not patient_ref_input.strip():
+                        st.error("Please enter a Patient Reference ID before saving.")
+                    else:
+                        try:
+                            # Capture referral_due from the existing action_pathway field.
+                            # This is NOT a new clinical rule — it records the existing
+                            # referral engine output verbatim.
+                            _referral_due = ref.get("action_pathway", "")
+                            _band, _ = _confidence_band(pred["confidence"])
+                            _band_short = _band.replace(" model confidence", "").strip()
+                            _rec_id = save_record(
+                                patient_ref=patient_ref_input.strip(),
+                                predicted_class=pred_class,
+                                severity=pred["severity"],
+                                confidence_pct=round(pred["confidence"] * 100.0, 4),
+                                confidence_band=_band_short,
+                                quality_score=float(quality.get("quality_score", 0.0)),
+                                referral_priority=ref.get("referral_priority", ""),
+                                referral_due=_referral_due,
+                                recommendation=ref.get("recommendation", ""),
+                                db_path=_tracker_db,
+                            )
+                            st.success(
+                                f"Saved to tracker. Record ID: `{_rec_id}` | Status: **Pending** — "
+                                "View and update follow-up progress in the Referral Tracker page."
+                            )
+                        except Exception as _save_err:
+                            st.error(f"Save failed: {_save_err}")
 
         # ── 8. Latency & Metadata ──────────────────────────────────────────
         st.divider()
