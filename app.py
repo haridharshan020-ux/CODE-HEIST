@@ -28,12 +28,24 @@ UI Change Log:
     - Referral support clearly separated from AI prediction.
     - Clinical review notice added as a mandatory final section.
     - Zero changes to pipeline.py, model, quality gate, referral engine, or Grad-CAM.
+  - v1.3 (2026-09-19): Referral Follow-up Tracker integration.
+    - Added "Save to Tracker" section after Clinical Review (additive only).
+    - Health worker enters patient_ref (free text) and saves to local SQLite DB.
+    - No patient images stored. No data leaves the device.
+    - referral_due captures existing action_pathway (not a new clinical rule).
+    - Zero changes to pipeline, model, quality gate, referral engine, or Grad-CAM.
 """
 
 from pathlib import Path
 from PIL import Image
 import streamlit as st
 from pipeline import DRScreeningPipeline
+from referral_tracker import (
+    default_db_path,
+    init_db,
+    save_record,
+    VALID_STATUSES,
+)
 
 # ── Page Configuration ─────────────────────────────────────────────────────
 st.set_page_config(
@@ -383,7 +395,70 @@ if uploaded_file is not None:
             "or locally approved diagnostic protocols."
         )
 
-        # ── 7. Latency & Metadata ──────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════
+        # ── 7. Save to Referral Tracker ───────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════
+        st.divider()
+        st.subheader("7. Save to Referral Tracker")
+        st.caption(
+            "Save this screening result to the local offline referral tracker. "
+            "No patient image is stored. All data stays on this device only."
+        )
+
+        # Initialise tracker DB (idempotent)
+        _tracker_db = default_db_path()
+        try:
+            init_db(_tracker_db)
+        except Exception as _db_err:
+            st.warning(f"Tracker DB initialisation failed: {_db_err}")
+            _tracker_db = None
+
+        if _tracker_db is not None:
+            with st.form("save_to_tracker_form", clear_on_submit=True):
+                patient_ref_input = st.text_input(
+                    "Patient Reference ID",
+                    placeholder="e.g. PHC-2026-001 (free text, your local identifier)",
+                    help=(
+                        "Enter a local patient reference for follow-up coordination. "
+                        "Do not enter biometric or national ID numbers."
+                    ),
+                    key="tracker_patient_ref",
+                )
+                save_btn = st.form_submit_button(
+                    "Save Screening to Tracker", type="secondary"
+                )
+
+            if save_btn:
+                if not patient_ref_input.strip():
+                    st.error("Please enter a Patient Reference ID before saving.")
+                else:
+                    try:
+                        # Capture referral_due from the existing action_pathway field.
+                        # This is NOT a new clinical rule — it records the existing
+                        # referral engine output verbatim.
+                        _referral_due = ref.get("action_pathway", "")
+                        _band, _ = _confidence_band(pred["confidence"])
+                        _band_short = _band.replace(" model confidence", "").strip()
+                        _rec_id = save_record(
+                            patient_ref=patient_ref_input.strip(),
+                            predicted_class=int(pred["class"]),
+                            severity=pred["severity"],
+                            confidence_pct=round(pred["confidence"] * 100.0, 4),
+                            confidence_band=_band_short,
+                            quality_score=float(quality.get("quality_score", 0.0)),
+                            referral_priority=ref.get("referral_priority", ""),
+                            referral_due=_referral_due,
+                            recommendation=ref.get("recommendation", ""),
+                            db_path=_tracker_db,
+                        )
+                        st.success(
+                            f"Saved to tracker. Record ID: `{_rec_id}` — "
+                            "View in the Referral Tracker page."
+                        )
+                    except Exception as _save_err:
+                        st.error(f"Save failed: {_save_err}")
+
+        # ── 8. Latency & Metadata ──────────────────────────────────────────
         st.divider()
         st.caption(
             f"Processing time: {result['processing_time_sec']:.2f}s "

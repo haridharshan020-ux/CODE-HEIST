@@ -40,6 +40,10 @@ streamlit.err.log
 train_e1a.log
 train_e1b.log
 
+# Referral tracker local database and CSV exports (local-only, never committed)
+referral_tracker.db
+referral_tracker_export.csv
+
 # Offline data-prep and training scripts (kept local)
 analyze_duplicates.py
 clean_dataset.py

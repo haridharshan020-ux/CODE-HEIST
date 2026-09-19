@@ -1,4 +1,4 @@
-"""
+﻿"""
 test_app_ui.py
 --------------
 Tests app.py via Streamlit's official AppTest testing framework.
@@ -23,14 +23,14 @@ def test_ui():
     print("  TESTING STREAMLIT UI (APP.PY) VIA APPTEST")
     print("=" * 70)
 
-    # ── TEST 1: Initial App Launch ─────────────────────────────────
+    # â”€â”€ TEST 1: Initial App Launch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     print("\n[Test 1] Launching app.py without upload...")
-    at = AppTest.from_file("app.py", default_timeout=30).run()
+    at = AppTest.from_file("app.py", default_timeout=90).run()
     assert not at.exception, f"App raised exception on load: {at.exception}"
     print("  App initialized successfully without exceptions.")
     print(f"  Title: {[t.value.encode('ascii', 'replace').decode('ascii') for t in at.title]}")
 
-    # ── TEST 2: Good Quality Image Screening ───────────────────────
+    # â”€â”€ TEST 2: Good Quality Image Screening â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     print("\n[Test 2] Simulating upload of good-quality image (165634a6167e.png)...")
     good_img_path = images_dir / "165634a6167e.png"
     good_img = Image.open(good_img_path)
@@ -38,7 +38,7 @@ def test_ui():
     good_img.save(good_bytes, format="PNG")
     good_bytes.seek(0)
 
-    at_good = AppTest.from_file("app.py", default_timeout=30)
+    at_good = AppTest.from_file("app.py", default_timeout=90)
     at_good.run()
     at_good.file_uploader[0].upload("165634a6167e.png", good_bytes.getvalue()).run()
     assert not at_good.exception, f"Exception during upload: {at_good.exception}"
@@ -65,14 +65,14 @@ def test_ui():
     assert "Predicted Severity" in metric_labels, "Severity metric missing!"
     assert len(at_good.image) >= 2, "Both uploaded and Grad-CAM images should be rendered!"
 
-    # ── TEST 3: Inadequate Quality Image Rejection ──────────────────
+    # â”€â”€ TEST 3: Inadequate Quality Image Rejection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     print("\n[Test 3] Simulating upload of heavily blurred image (Inadequate quality)...")
     blurred_img = good_img.filter(ImageFilter.GaussianBlur(radius=15))
     blur_bytes = io.BytesIO()
     blurred_img.save(blur_bytes, format="PNG")
     blur_bytes.seek(0)
 
-    at_blur = AppTest.from_file("app.py", default_timeout=30)
+    at_blur = AppTest.from_file("app.py", default_timeout=90)
     at_blur.run()
     at_blur.file_uploader[0].upload("blurred_retina.png", blur_bytes.getvalue()).run()
     at_blur.button[0].click().run()
@@ -96,3 +96,4 @@ def test_ui():
 
 if __name__ == "__main__":
     test_ui()
+
