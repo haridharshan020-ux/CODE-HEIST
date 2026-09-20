@@ -30,7 +30,8 @@ checkpoints/*
 !checkpoints/best_model_combined_v1.pth
 
 # Exclude Objective 10 multi-page UI from cloud deployment while preserving locally
-/pages/
+/pages/*
+!/pages/Referral_Tracker.py
 
 # Local execution logs and runtime output artifacts
 outputs/
@@ -39,6 +40,10 @@ streamlit.log
 streamlit.err.log
 train_e1a.log
 train_e1b.log
+
+# Referral tracker local database and CSV exports (local-only, never committed)
+referral_tracker.db
+referral_tracker_export.csv
 
 # Offline data-prep and training scripts (kept local)
 analyze_duplicates.py

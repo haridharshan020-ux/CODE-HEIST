@@ -51,19 +51,49 @@ infer_transforms = transforms.Compose([
 ])
 
 
+# ── Model Integrity & Checkpoint Protection ──────────────────────────
+PROTECTED_V1_HASH = "3FA407E505F8653F00BD2CFB997224247E76FAC93C18DDEA7F35A973B0B85D05"
+
+
+def verify_checkpoint_integrity(checkpoint_path: Union[str, Path]) -> None:
+    """
+    Verifies that the V1 model checkpoint matches the protected SHA-256 hash.
+    Halts execution with RuntimeError if verification fails.
+    """
+    ckpt_path = Path(checkpoint_path)
+    if not ckpt_path.exists():
+        raise FileNotFoundError(f"Model checkpoint not found at: {ckpt_path}")
+
+    if ckpt_path.name == "best_model_combined_v1.pth":
+        import hashlib
+        h = hashlib.sha256()
+        with open(ckpt_path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        actual_hash = h.hexdigest().upper()
+        if actual_hash != PROTECTED_V1_HASH:
+            raise RuntimeError(
+                f"SAFETY INTEGRITY ERROR: Model checkpoint '{ckpt_path.name}' hash mismatch!\n"
+                f"  Expected: {PROTECTED_V1_HASH}\n"
+                f"  Actual:   {actual_hash}\n"
+                "Inference blocked: checkpoint appears corrupted or modified."
+            )
+
+
 def load_model(checkpoint_path: Union[str, Path], device: torch.device) -> nn.Module:
     """
     Constructs EfficientNet-B0 with 5-class head and loads checkpoint weights.
+    Strictly offline: constructs architecture with weights=None (zero network download).
     """
     ckpt_path = Path(checkpoint_path)
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found at: {ckpt_path}")
 
-    # Build base model
-    try:
-        model = models.efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
-    except Exception:
-        model = models.efficientnet_b0(weights=None)
+    # Model integrity verification before loading weights
+    verify_checkpoint_integrity(ckpt_path)
+
+    # Build base model architecture strictly offline (no pretrained weights requested)
+    model = models.efficientnet_b0(weights=None)
 
     in_features = model.classifier[1].in_features
     model.classifier = nn.Sequential(

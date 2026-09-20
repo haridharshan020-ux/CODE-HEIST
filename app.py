@@ -19,12 +19,33 @@ UI Change Log:
     CSS uses only: standard HTML element selectors, Streamlit data-testid
     attributes confirmed present in Streamlit 1.63.0 AppTest API, and
     @media queries. No internal st-emotion-cache-* class names used.
+  - v1.2 (2026-09-15): Phase 1 Step 2 — Confidence handling + Human-in-the-Loop UI.
+    - Explicit AI SCREENING RESULT / EXPLAINABILITY / REFERRAL SUPPORT / CLINICAL REVIEW sections.
+    - Model confidence band (High/Moderate/Low) displayed as prototype engineering bands.
+    - Uncalibrated confidence notice added inline.
+    - Low-confidence caution message added.
+    - Grad-CAM explainability notice clarified.
+    - Referral support clearly separated from AI prediction.
+    - Clinical review notice added as a mandatory final section.
+    - Zero changes to pipeline.py, model, quality gate, referral engine, or Grad-CAM.
+  - v1.3 (2026-09-19): Referral Follow-up Tracker integration.
+    - Added "Save to Tracker" section after Clinical Review (additive only).
+    - Health worker enters patient_ref (free text) and saves to local SQLite DB.
+    - No patient images stored. No data leaves the device.
+    - referral_due captures existing action_pathway (not a new clinical rule).
+    - Zero changes to pipeline, model, quality gate, referral engine, or Grad-CAM.
 """
 
 from pathlib import Path
 from PIL import Image
 import streamlit as st
 from pipeline import DRScreeningPipeline
+from referral_tracker import (
+    default_db_path,
+    init_db,
+    save_record,
+    VALID_STATUSES,
+)
 
 # ── Page Configuration ─────────────────────────────────────────────────────
 st.set_page_config(
@@ -173,11 +194,45 @@ img {
 </style>
 """, unsafe_allow_html=True)
 
+
+# ── Confidence Band Helper ─────────────────────────────────────────────────
+# PROTOTYPE ENGINEERING BANDS — NOT CLINICALLY VALIDATED.
+# These bands (High >= 75%, Moderate 50-74.99%, Low < 50%) are engineering
+# thresholds for UI display purposes only. They are NOT clinical confidence
+# thresholds, have not been validated against expert graders, and MUST NOT
+# be described as clinically validated certainty levels.
+_CONF_HIGH_THRESHOLD = 0.75   # prototype engineering threshold
+_CONF_MOD_THRESHOLD = 0.50    # prototype engineering threshold
+
+
+def _confidence_band(confidence_0_to_1: float) -> tuple:
+    """
+    Returns (band_label, caution_message_or_None) for a given confidence in [0,1].
+
+    PROTOTYPE ENGINEERING BANDS — NOT CLINICALLY VALIDATED.
+    Returns:
+        band_label: "High model confidence" | "Moderate model confidence" | "Low model confidence"
+        caution_msg: None for High/Moderate, caution string for Low.
+    """
+    if confidence_0_to_1 >= _CONF_HIGH_THRESHOLD:
+        return "High model confidence", None
+    elif confidence_0_to_1 >= _CONF_MOD_THRESHOLD:
+        return "Moderate model confidence", None
+    else:
+        return (
+            "Low model confidence",
+            "Low model confidence. Results are less reliable — consider repeat imaging and/or specialist review."
+        )
+
+
 # ── Header & Mandatory Clinical Disclaimer ─────────────────────────────────
 st.title("👁️ Retinal DR Screening System")
 st.caption("AI-assisted Decision Support for Rural Health Centers | SIH 2026")
 
-st.info("⚠️ **Clinical Disclaimer:** AI screening result — not a clinical diagnosis.")
+st.info(
+    "**Clinical Disclaimer:** This tool provides AI-assisted decision support only. "
+    "It is NOT a clinical diagnosis. All outputs require review by a qualified clinician."
+)
 
 # ── Pipeline Caching ───────────────────────────────────────────────────────
 DEFAULT_CHECKPOINT = Path(__file__).parent.resolve() / "checkpoints" / "best_model_combined_v1.pth"
@@ -196,7 +251,18 @@ uploaded_file = st.file_uploader(
     help="Upload an uncompressed or standard fundus photograph.",
 )
 
+# Manage screening session state to persist results across form submissions
+if "screening_result" not in st.session_state:
+    st.session_state["screening_result"] = None
+if "screened_file_name" not in st.session_state:
+    st.session_state["screened_file_name"] = None
+
 if uploaded_file is not None:
+    # If the user selected a different image, invalidate previous result
+    if st.session_state.get("screened_file_name") != uploaded_file.name:
+        st.session_state["screening_result"] = None
+        st.session_state["screened_file_name"] = uploaded_file.name
+
     try:
         pil_image = Image.open(uploaded_file).convert("RGB")
         st.image(pil_image, caption=f"Uploaded: {uploaded_file.name}", use_container_width=True)
@@ -210,7 +276,12 @@ if uploaded_file is not None:
 
     if start_button:
         with st.spinner("Processing retinal scan..."):
-            result = pipeline.process(pil_image, generate_gradcam=True, save_visualizations=True)
+            st.session_state["screening_result"] = pipeline.process(
+                pil_image, generate_gradcam=True, save_visualizations=True
+            )
+
+    if st.session_state.get("screening_result") is not None:
+        result = st.session_state["screening_result"]
 
         st.divider()
 
@@ -220,44 +291,67 @@ if uploaded_file is not None:
 
         if quality and quality["quality_ok"]:
             st.success(
-                f"✅ **Quality Acceptable** (Score: {quality['quality_score']}/100) — "
+                f"Quality Acceptable (Score: {quality['quality_score']}/100) — "
                 f"{quality['recommendation']}"
             )
         else:
             q_score = quality["quality_score"] if quality else 0.0
-            st.error(f"❌ **Quality Inadequate** (Score: {q_score}/100)")
-            st.warning(
-                "⚠️ **Action Required:** Please recapture image with better "
+            st.error(f"Quality Inadequate (Score: {q_score}/100)")
+            # Use primary_failure_reason from Step 1 if available
+            failure_reason = (quality or {}).get("primary_failure_reason", "")
+            recapture_msg = (
+                "Action Required: Please recapture image with better "
                 "focus, illumination, or field of view."
             )
+            if failure_reason:
+                recapture_msg = f"Action Required: {failure_reason} Please recapture image."
+            st.warning(recapture_msg)
             if quality and quality["warnings"]:
                 st.write("**Detected Issues:**")
                 for w in quality["warnings"]:
                     st.write(f"- {w}")
-            # Stop execution immediately as required by quality gate logic
+            # Quality gate interlock: stop all downstream output
             st.stop()
 
-        # ── 3. Screening Prediction ────────────────────────────────────────
-        st.subheader("3. Screening Prediction")
+        # ══════════════════════════════════════════════════════════════════
+        # ── 3. AI SCREENING RESULT ────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════
+        st.divider()
+        st.subheader("3. AI Screening Result")
+
         pred = result["prediction"]
         conf_pct = pred["confidence"] * 100.0
+        band_label, caution_msg = _confidence_band(pred["confidence"])
 
-        # Two metrics side-by-side on desktop; they auto-stack on mobile
-        # because the CSS sets width:100% and flex-wrap on narrow viewports.
-        col1, col2 = st.columns(2)
+        # Three metrics: severity / model confidence / confidence band
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Predicted Severity", f"Class {pred['class']} ({pred['severity']})")
         with col2:
             st.metric("Model Confidence", f"{conf_pct:.2f}%")
+        with col3:
+            st.metric("Confidence Band", band_label)
 
-        st.divider()
-
-        # ── 4. Visual Attention (Grad-CAM) ─────────────────────────────────
-        st.subheader("4. Visual Attention (Grad-CAM)")
+        # Mandatory uncalibrated-confidence notice
         st.caption(
-            "Highlighted areas show regions receiving stronger model attention for the "
-            "predicted class. This provides visual explainability and does NOT constitute "
-            "clinical proof of lesions."
+            "Model confidence is an uncalibrated model output and is not a clinical probability. "
+            "It reflects the model's output score for the predicted class, not a medically validated "
+            "likelihood of disease. Confidence band thresholds are prototype engineering values only."
+        )
+
+        # Low-confidence caution (only shown when applicable)
+        if caution_msg:
+            st.warning(f"Low model confidence: {caution_msg}")
+
+        # ══════════════════════════════════════════════════════════════════
+        # ── 4. Explainability (Grad-CAM) ─────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════
+        st.divider()
+        st.subheader("4. Explainability (Grad-CAM)")
+        st.caption(
+            "Grad-CAM highlights image regions that influenced the model's prediction for the predicted class. "
+            "This is a visual explanation of model attention only — it does NOT prove the presence of a lesion "
+            "or constitute clinical evidence of disease."
         )
 
         exp = result["explainability"]
@@ -275,10 +369,17 @@ if uploaded_file is not None:
         else:
             st.info("Grad-CAM explanation was not generated.")
 
+        # ══════════════════════════════════════════════════════════════════
+        # ── 5. Referral Support ───────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════
         st.divider()
+        st.subheader("5. Referral Support")
+        st.caption(
+            "The referral support output below is decision-support information intended to assist "
+            "healthcare workers. It is NOT an autonomous clinical decision, a confirmed diagnosis, "
+            "or a treatment plan."
+        )
 
-        # ── 5. Referral-Support Recommendation ────────────────────────────
-        st.subheader("5. Referral-Support Recommendation")
         ref = result["referral"]
         priority = ref["referral_priority"]
 
@@ -290,16 +391,115 @@ if uploaded_file is not None:
             st.error(f"**Referral Priority:** {priority}")
 
         st.write(f"**Action Pathway:** {ref['action_pathway']}")
-        st.write(f"**Clinical Recommendation:** {ref['recommendation']}")
+        st.write(f"**Referral Recommendation:** {ref['recommendation']}")
 
         if ref["warnings"]:
             for w in ref["warnings"]:
                 st.caption(f"Note: {w}")
 
-        # ── 6. Latency & Metadata ──────────────────────────────────────────
+        st.caption(f"Disclaimer: {ref['disclaimer']}")
+
+        # ══════════════════════════════════════════════════════════════════
+        # ── 6. Clinical Review Notice ─────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════
+        st.divider()
+        st.subheader("6. Clinical Review")
+        st.info(
+            "Final interpretation of this screening result must be made by an appropriately "
+            "trained clinician. This tool provides AI-assisted decision support only. "
+            "It is not a substitute for clinical examination, expert ophthalmological assessment, "
+            "or locally approved diagnostic protocols."
+        )
+
+        # ══════════════════════════════════════════════════════════════════
+        # ── 7. Referral Follow-up Tracker ─────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════
+        st.divider()
+        st.subheader("7. Referral Follow-up Tracker")
+
+        pred = result["prediction"]
+        pred_class = int(pred["class"]) if pred else 0
+
+        if pred_class == 0:
+            # ── No DR Condition ───────────────────────────────────────────
+            # Do not treat as a referral case.
+            # Do not require worker to create a referral follow-up record.
+            st.info(
+                "**No referral required**\n\n"
+                "Routine follow-up according to local clinical protocol.\n\n"
+                "This screening detected no features of diabetic retinopathy. "
+                "Referral follow-up tracking is only offered when a specialist referral is indicated."
+            )
+        else:
+            # ── Referral Cases (Classes 1–4) ──────────────────────────────
+            st.caption(
+                "Specialist referral / clinical review is recommended. "
+                "Record this referral in the local offline tracker to support continuity of care. "
+                "Follow-up status is maintained manually by the healthcare worker based on "
+                "available follow-up information. No patient image is stored."
+            )
+
+            # Initialise tracker DB (idempotent)
+            _tracker_db = default_db_path()
+            try:
+                init_db(_tracker_db)
+            except Exception as _db_err:
+                st.warning(f"Tracker DB initialisation failed: {_db_err}")
+                _tracker_db = None
+
+            if _tracker_db is not None:
+                with st.form("save_to_tracker_form", clear_on_submit=False):
+                    patient_ref_input = st.text_input(
+                        "Patient Reference ID",
+                        placeholder="e.g. PHC-2026-001 (free text, your local identifier)",
+                        help=(
+                            "Enter a local patient reference for follow-up coordination. "
+                            "Do not enter biometric or national ID numbers."
+                        ),
+                        key="tracker_patient_ref",
+                    )
+                    st.caption(
+                        "Initial Status upon saving: **Pending** "
+                        "(referral is recommended; worker has not yet initiated/given the referral)."
+                    )
+                    save_btn = st.form_submit_button(
+                        "Save Screening to Tracker", type="secondary"
+                    )
+
+                if save_btn:
+                    if not patient_ref_input.strip():
+                        st.error("Please enter a Patient Reference ID before saving.")
+                    else:
+                        try:
+                            # Capture referral_due from the existing action_pathway field.
+                            # This is NOT a new clinical rule — it records the existing
+                            # referral engine output verbatim.
+                            _referral_due = ref.get("action_pathway", "")
+                            _band, _ = _confidence_band(pred["confidence"])
+                            _band_short = _band.replace(" model confidence", "").strip()
+                            _rec_id = save_record(
+                                patient_ref=patient_ref_input.strip(),
+                                predicted_class=pred_class,
+                                severity=pred["severity"],
+                                confidence_pct=round(pred["confidence"] * 100.0, 4),
+                                confidence_band=_band_short,
+                                quality_score=float(quality.get("quality_score", 0.0)),
+                                referral_priority=ref.get("referral_priority", ""),
+                                referral_due=_referral_due,
+                                recommendation=ref.get("recommendation", ""),
+                                db_path=_tracker_db,
+                            )
+                            st.success(
+                                f"Saved to tracker. Record ID: `{_rec_id}` | Status: **Pending** — "
+                                "View and update follow-up progress in the Referral Tracker page."
+                            )
+                        except Exception as _save_err:
+                            st.error(f"Save failed: {_save_err}")
+
+        # ── 8. Latency & Metadata ──────────────────────────────────────────
         st.divider()
         st.caption(
-            f"⚡ Processing time: {result['processing_time_sec']:.2f}s "
+            f"Processing time: {result['processing_time_sec']:.2f}s "
             f"| Device: {pipeline.device} | Fully Offline"
         )
         st.caption("Checkpoint: best_model_combined_v1.pth")
