@@ -9,8 +9,9 @@ This is a prototype administrative coordination tool for rural health workers.
 It is NOT a certified clinical record system, EHR, or medical device.
 No patient images are stored. All data remains on this device.
 
-This page is intentionally excluded from Streamlit Cloud deployment
-via the /pages/ rule in .gitignore. It is a local-only tool.
+This page provides referral continuity coordination. When hosted on cloud platforms
+(e.g. Streamlit Cloud), container storage is ephemeral; use local offline deployment
+and CSV export for persistent rural clinic workflows.
 """
 
 import io
@@ -53,8 +54,8 @@ st.info(
     "**Prototype Administrative Tool Only.**  \n"
     "This tracker supports referral continuity in rural screening centres that may not have an onsite ophthalmologist. "
     "**It does NOT claim to automatically know whether a patient visited the eye hospital.** "
-    "All follow-up statuses are entered manually by an authorised healthcare worker based on available follow-up information. "
-    "Records are stored locally on this device in an offline SQLite database. No patient images are stored."
+    "All follow-up statuses are entered manually by an authorised healthcare worker based on available follow-up information.  \n\n"
+    "**Storage & Cloud Notice:** Records are stored in a local SQLite database. On cloud-hosted environments (such as Streamlit Community Cloud), container storage is ephemeral and will reset upon container reboot; it is NOT a certified production medical record system (EHR). For permanent clinical records, use the local offline installation and export data regularly via CSV."
 )
 
 st.divider()
